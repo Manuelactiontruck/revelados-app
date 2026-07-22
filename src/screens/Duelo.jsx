@@ -3,49 +3,41 @@ import { supabase } from '../supabaseClient'
 import { enviarPush } from '../lib/push'
 import { CATEGORIAS, ORDEN_CATEGORIAS } from '../lib/categorias'
 
+const MODOS = [
+  { id: 'adivinar', label: '🧠 Adivinar', desc: 'Respondes en secreto, tu pareja intenta adivinarlo.' },
+  { id: 'match', label: '🤝 Match', desc: 'Los dos elegís por separado. Si coincidís, ganáis.' },
+  { id: 'reto', label: '🌶️ Reto', desc: 'Un reto directo para que tu pareja lo cumpla ya.' },
+]
+
 export default function Duelo({ yo, pareja }) {
-  const [vista, setVista] = useState('menu') // menu | categoria | pendientes | responder | resultado
+  const [vista, setVista] = useState('menu')
   const [categoriaSel, setCategoriaSel] = useState(null)
+  const [modoSel, setModoSel] = useState(null)
   const [pendientes, setPendientes] = useState([])
   const [progreso, setProgreso] = useState({})
-  const [rondaActiva, setRondaActiva] = useState(null)
+  const [activo, setActivo] = useState(null)
   const [resultado, setResultado] = useState(null)
 
   const cargarPendientes = useCallback(async () => {
-    const { data: partidas } = await supabase
-      .from('partidas')
-      .select('*')
-      .eq('estado', 'en_curso')
-      .or(`jugador_a_id.eq.${yo.id},jugador_b_id.eq.${yo.id}`)
-
-    if (!partidas || partidas.length === 0) {
-      setPendientes([])
-      return
-    }
-
-    const ids = partidas.map((p) => p.id)
-    const { data: rondas } = await supabase
-      .from('rondas')
-      .select('*, preguntas(*)')
-      .in('partida_id', ids)
-      .order('created_at', { ascending: false })
-
-    const masReciente = {}
-    for (const r of rondas || []) {
-      if (!masReciente[r.partida_id]) masReciente[r.partida_id] = r
-    }
-    const partidaPorId = Object.fromEntries(partidas.map((p) => [p.id, p]))
-
-    const pend = Object.values(masReciente)
-      .map((r) => ({ ...r, partidas: partidaPorId[r.partida_id] }))
-      .filter((r) => {
-        const p = r.partidas
-        if (p.jugador_a_id === yo.id) return r.respuesta_a === null
-        if (p.jugador_b_id === yo.id) return r.respuesta_b === null
-        return false
-      })
-
-    setPendientes(pend)
+    const [{ data: porResponder }, { data: porConfirmar }] = await Promise.all([
+      supabase
+        .from('duelos')
+        .select('*, preguntas(*)')
+        .eq('jugador_b_id', yo.id)
+        .eq('estado', 'pendiente_receptor')
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('duelos')
+        .select('*, preguntas(*)')
+        .eq('jugador_a_id', yo.id)
+        .eq('estado', 'pendiente_confirmacion')
+        .order('created_at', { ascending: true }),
+    ])
+    const lista = [
+      ...(porResponder || []).map((d) => ({ ...d, accion: 'responder' })),
+      ...(porConfirmar || []).map((d) => ({ ...d, accion: 'confirmar' })),
+    ]
+    setPendientes(lista)
   }, [yo.id])
 
   const cargarProgreso = useCallback(async () => {
@@ -59,9 +51,8 @@ export default function Duelo({ yo, pareja }) {
     cargarPendientes()
     cargarProgreso()
     const canal = supabase
-      .channel('rondas-duelo')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rondas' }, cargarPendientes)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'partidas' }, cargarPendientes)
+      .channel('duelos-canal')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'duelos' }, cargarPendientes)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'progreso_quesitos' }, cargarProgreso)
       .subscribe()
     return () => supabase.removeChannel(canal)
@@ -70,36 +61,25 @@ export default function Duelo({ yo, pareja }) {
   function irAMenu() {
     setVista('menu')
     setCategoriaSel(null)
-    setRondaActiva(null)
+    setModoSel(null)
+    setActivo(null)
     setResultado(null)
     cargarPendientes()
     cargarProgreso()
   }
 
   if (vista === 'resultado' && resultado) {
-    return (
-      <ResultadoVista
-        resultado={resultado}
-        yo={yo}
-        onSeguirJugando={(ronda) => {
-          setRondaActiva(ronda)
-          setResultado(null)
-          setVista('responder')
-        }}
-        onVolver={irAMenu}
-      />
-    )
+    return <ResultadoVista resultado={resultado} onVolver={irAMenu} />
   }
 
-  if (vista === 'responder' && rondaActiva) {
+  if (vista === 'accion' && activo) {
     return (
-      <ResponderRonda
-        ronda={rondaActiva}
+      <AccionDuelo
+        duelo={activo}
         yo={yo}
         pareja={pareja}
-        onResultado={(r, siguienteRonda) => {
+        onResultado={(r) => {
           setResultado(r)
-          setRondaActiva(siguienteRonda || null)
           setVista('resultado')
         }}
         onVolver={irAMenu}
@@ -113,19 +93,20 @@ export default function Duelo({ yo, pareja }) {
         <button className="link-btn" onClick={irAMenu}>
           ← Volver
         </button>
-        <h3 className="titulo-centro">Duelos esperando tu respuesta</h3>
-        {pendientes.map((r) => {
-          const cat = CATEGORIAS[r.partidas.categoria]
+        <h3 className="titulo-centro">Duelos esperando algo tuyo</h3>
+        {pendientes.map((d) => {
+          const cat = CATEGORIAS[d.categoria]
           return (
             <div
-              key={r.id}
+              key={d.id}
               className="opcion-card"
               onClick={() => {
-                setRondaActiva(r)
-                setVista('responder')
+                setActivo(d)
+                setVista('accion')
               }}
             >
-              {cat.icono} {cat.nombre}
+              {cat.icono} {cat.nombre} —{' '}
+              {d.accion === 'confirmar' ? 'confirmar si acertó tu pareja' : 'responder'}
             </div>
           )
         })}
@@ -133,14 +114,43 @@ export default function Duelo({ yo, pareja }) {
     )
   }
 
-  if (vista === 'categoria' && categoriaSel) {
+  if (vista === 'modo' && categoriaSel) {
+    return (
+      <div>
+        <button className="link-btn" onClick={irAMenu}>
+          ← Volver a categorías
+        </button>
+        <h3 style={{ color: categoriaSel.color }}>
+          {categoriaSel.icono} {categoriaSel.nombre}
+        </h3>
+        <p className="paso-titulo">¿Qué tipo de duelo lanzas?</p>
+        {MODOS.map((m) => (
+          <div
+            key={m.id}
+            className="opcion-card"
+            onClick={() => {
+              setModoSel(m.id)
+              setVista('lanzar')
+            }}
+          >
+            <b>{m.label}</b>
+            <br />
+            <small className="ayuda-texto">{m.desc}</small>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  if (vista === 'lanzar' && categoriaSel && modoSel) {
     return (
       <LanzarDuelo
         categoria={categoriaSel}
+        modo={modoSel}
         yo={yo}
         pareja={pareja}
         onEnviado={irAMenu}
-        onVolver={irAMenu}
+        onVolver={() => setVista('modo')}
       />
     )
   }
@@ -149,7 +159,7 @@ export default function Duelo({ yo, pareja }) {
     <div>
       {pendientes.length > 0 && (
         <button className="aviso-pendiente" onClick={() => setVista('pendientes')}>
-          🔥 Tienes {pendientes.length} duelo{pendientes.length > 1 ? 's' : ''} esperando tu respuesta →
+          🔥 Tienes {pendientes.length} duelo{pendientes.length > 1 ? 's' : ''} esperando algo tuyo →
         </button>
       )}
       <h3 className="titulo-centro">Elige la temática del Duelo de hoy:</h3>
@@ -164,7 +174,7 @@ export default function Duelo({ yo, pareja }) {
               style={{ borderLeftColor: cat.color }}
               onClick={() => {
                 setCategoriaSel(cat)
-                setVista('categoria')
+                setVista('modo')
               }}
             >
               <div className="cat-icono">{cat.icono}</div>
@@ -180,60 +190,70 @@ export default function Duelo({ yo, pareja }) {
   )
 }
 
-function LanzarDuelo({ categoria, yo, pareja, onEnviado, onVolver }) {
-  const [premio, setPremio] = useState(null)
+function LanzarDuelo({ categoria, modo, yo, pareja, onEnviado, onVolver }) {
   const [pregunta, setPregunta] = useState(null)
+  const [premio, setPremio] = useState(null)
   const [respuesta, setRespuesta] = useState(null)
+  const [textoLibre, setTextoLibre] = useState('')
   const [enviando, setEnviando] = useState(false)
 
+  const necesitaPremio = modo === 'adivinar'
+
   useEffect(() => {
-    if (premio && !pregunta) {
-      supabase
-        .from('preguntas')
-        .select('*')
-        .eq('categoria', categoria.id)
-        .then(({ data }) => {
-          const lista = data || []
-          const azar = lista[Math.floor(Math.random() * lista.length)]
-          setPregunta(azar)
-        })
-    }
-  }, [premio, pregunta, categoria.id])
+    supabase
+      .from('preguntas')
+      .select('*')
+      .eq('categoria', categoria.id)
+      .eq('modo', modo)
+      .then(({ data }) => {
+        const lista = data || []
+        setPregunta(lista[Math.floor(Math.random() * lista.length)])
+      })
+  }, [categoria.id, modo])
+
+  const listoParaEnviar =
+    pregunta &&
+    (!necesitaPremio || premio) &&
+    (modo === 'reto' || (modo === 'adivinar' ? textoLibre.trim().length > 0 : !!respuesta))
 
   async function lanzar() {
     setEnviando(true)
-    const { data: partidaId, error } = await supabase.rpc('revelados_lanzar_partida', {
+    const p_respuesta = modo === 'adivinar' ? textoLibre.trim() : modo === 'match' ? respuesta : null
+    const { data: duelo_id, error } = await supabase.rpc('revelados_lanzar_duelo', {
       p_categoria: categoria.id,
+      p_modo: modo,
       p_jugador_id: yo.id,
-      p_premio: premio,
       p_pregunta_id: pregunta.id,
-      p_respuesta: respuesta,
+      p_respuesta,
+      p_premio: necesitaPremio ? premio : null,
     })
     if (error) {
-      alert('Error al lanzar el duelo: ' + error.message)
+      alert('Error al lanzar: ' + error.message)
       setEnviando(false)
       return
     }
-    await enviarPush({
-      para_quien_id: pareja.id,
-      titulo: 'REVELADOS 🎲',
-      cuerpo: `${yo.nombre} te ha lanzado un Duelo de "${categoria.nombre}"`,
-      url: '/',
-    })
+    const mensajes = {
+      adivinar: `${yo.nombre} te ha lanzado un duelo de "Adivinar" en ${categoria.nombre}`,
+      match: `${yo.nombre} te ha lanzado un duelo de "Match" en ${categoria.nombre}`,
+      reto: `${yo.nombre} te ha lanzado un Reto en ${categoria.nombre}`,
+    }
+    await enviarPush({ para_quien_id: pareja.id, titulo: 'REVELADOS 🎲', cuerpo: mensajes[modo], url: '/' })
     setEnviando(false)
-    onEnviado(partidaId)
+    onEnviado(duelo_id)
   }
+
+  if (!pregunta) return <p className="ayuda-texto">Cargando…</p>
 
   return (
     <div className="tarjeta-categoria" style={{ borderColor: categoria.color }}>
       <button className="link-btn" onClick={onVolver}>
-        ← Volver a categorías
+        ← Cambiar modo
       </button>
       <h3 style={{ color: categoria.color }}>
         {categoria.icono} {categoria.nombre}
       </h3>
 
-      {!premio && (
+      {necesitaPremio && !premio && (
         <>
           <p className="paso-titulo">1. Elige tu premio si ganas tú:</p>
           {categoria.apuestas.map((ap) => (
@@ -244,90 +264,151 @@ function LanzarDuelo({ categoria, yo, pareja, onEnviado, onVolver }) {
         </>
       )}
 
-      {premio && !pregunta && <p className="ayuda-texto">Cargando pregunta…</p>}
-
-      {premio && pregunta && !respuesta && (
+      {(!necesitaPremio || premio) && (
         <>
-          <p className="paso-titulo">2. Responde (gana quien acierte):</p>
-          <p className="pregunta-texto">{pregunta.texto}</p>
-          {pregunta.opciones.map((op) => (
-            <div key={op} className="opcion-card" onClick={() => setRespuesta(op)}>
-              {op}
-            </div>
-          ))}
+          <p className="paso-titulo">{pregunta.texto}</p>
+
+          {modo === 'adivinar' && (
+            <>
+              <p className="ayuda-texto">Escribe tu respuesta real y sincera (se mantiene en secreto):</p>
+              <textarea
+                className="pin-input"
+                style={{ width: '100%', minHeight: '70px', letterSpacing: 'normal', fontSize: '14px', textAlign: 'left' }}
+                value={textoLibre}
+                onChange={(e) => setTextoLibre(e.target.value)}
+                placeholder="Tu respuesta secreta…"
+              />
+            </>
+          )}
+
+          {modo === 'match' && (
+            <>
+              {pregunta.opciones.map((op) => (
+                <div
+                  key={op}
+                  className="opcion-card"
+                  style={{ background: respuesta === op ? '#f43f5e' : undefined }}
+                  onClick={() => setRespuesta(op)}
+                >
+                  {op}
+                </div>
+              ))}
+            </>
+          )}
+
+          {modo === 'reto' && <p className="ayuda-texto">Se enviará tal cual a {pareja.nombre}.</p>}
         </>
       )}
 
-      {premio && pregunta && respuesta && (
+      {listoParaEnviar && (
         <button className="btn-lanzar" disabled={enviando} onClick={lanzar}>
-          {enviando ? 'Enviando…' : `⚔️ LANZAR DUELO A ${pareja.nombre.toUpperCase()}`}
+          {enviando ? 'Enviando…' : `⚔️ LANZAR A ${pareja.nombre.toUpperCase()}`}
         </button>
       )}
     </div>
   )
 }
 
-function ResponderRonda({ ronda, yo, pareja, onResultado, onVolver }) {
-  const [respuesta, setRespuesta] = useState(null)
+function AccionDuelo({ duelo, yo, pareja, onResultado, onVolver }) {
+  const cat = CATEGORIAS[duelo.categoria]
   const [premio, setPremio] = useState(null)
+  const [respuesta, setRespuesta] = useState(null)
+  const [textoLibre, setTextoLibre] = useState('')
   const [enviando, setEnviando] = useState(false)
 
-  const cat = CATEGORIAS[ronda.partidas.categoria]
-  const soyJugadorB = ronda.partidas.jugador_b_id === yo.id
-  const necesitaPremio = soyJugadorB && !ronda.partidas.premio_b
+  const necesitaPremio = duelo.modo === 'adivinar'
+
+  async function enviarResultadoPush(titulo, cuerpo) {
+    await enviarPush({ para_quien_id: pareja.id, titulo, cuerpo, url: '/' })
+  }
 
   async function responder() {
     setEnviando(true)
-    const { data, error } = await supabase.rpc('revelados_responder_ronda', {
-      p_ronda_id: ronda.id,
+    const p_respuesta = duelo.modo === 'adivinar' ? textoLibre.trim() : duelo.modo === 'match' ? respuesta : null
+    const { data, error } = await supabase.rpc('revelados_responder_duelo', {
+      p_duelo_id: duelo.id,
       p_jugador_id: yo.id,
-      p_respuesta: respuesta,
+      p_respuesta,
       p_premio: necesitaPremio ? premio : null,
     })
-
     if (error) {
       alert('Error: ' + error.message)
       setEnviando(false)
       return
     }
-
-    if (data.resultado === 'esperando_otro') {
-      setEnviando(false)
-      onVolver()
-      return
-    }
-
-    if (data.resultado === 'empate') {
-      const { data: nuevaRonda } = await supabase
-        .from('rondas')
-        .select('*, preguntas(*), partidas!inner(*)')
-        .eq('id', data.nueva_ronda_id)
-        .single()
-      await enviarPush({
-        para_quien_id: pareja.id,
-        titulo: '🔁 ¡Empate!',
-        cuerpo: `Empate en ${cat.nombre}. Nueva pregunta de desempate esperando.`,
-        url: '/',
-      })
-      setEnviando(false)
-      onResultado({ tipo: 'empate', categoria: cat }, nuevaRonda)
-      return
-    }
-
-    // resuelta
-    const gano = data.ganador_id === yo.id
-    await enviarPush({
-      para_quien_id: pareja.id,
-      titulo: gano ? '😏 Has perdido el duelo' : '🏆 ¡Has ganado el duelo!',
-      cuerpo: gano
-        ? `${yo.nombre} acertó en ${cat.nombre}. Premio: ${data.premio_ganador}`
-        : `${yo.nombre} respondió. ¡Ganaste en ${cat.nombre}! Premio: ${data.premio_ganador}`,
-      url: '/',
-    })
     setEnviando(false)
-    onResultado({ tipo: 'resuelta', ...data, categoria: cat, gano }, null)
+
+    if (data.resultado === 'esperando_confirmacion') {
+      await enviarResultadoPush('🤔 Tu pareja ya respondió', `${yo.nombre} adivinó en ${cat.nombre}. Entra a confirmar si acertó.`)
+      onResultado({ tipo: 'esperando_confirmacion', categoria: cat })
+      return
+    }
+    if (data.resultado === 'match') {
+      await enviarResultadoPush('🎯 ¡Match!', `${yo.nombre} y tú coincidisteis en ${cat.nombre}: ${data.opcion}`)
+      onResultado({ tipo: 'match', categoria: cat, opcion: data.opcion, ...data })
+      return
+    }
+    if (data.resultado === 'no_match') {
+      await enviarResultadoPush('😅 No hubo match', `${yo.nombre} respondió en ${cat.nombre}, pero no coincidisteis.`)
+      onResultado({ tipo: 'no_match', categoria: cat, respuesta_a: data.respuesta_a, respuesta_b: data.respuesta_b })
+      return
+    }
+    if (data.resultado === 'completado') {
+      await enviarResultadoPush('✅ Reto cumplido', `${yo.nombre} ha cumplido el reto de ${cat.nombre}`)
+      onResultado({ tipo: 'reto_completado', categoria: cat, ...data })
+      return
+    }
   }
 
+  async function confirmar(acierto) {
+    setEnviando(true)
+    const { data, error } = await supabase.rpc('revelados_confirmar_adivinanza', {
+      p_duelo_id: duelo.id,
+      p_jugador_id: yo.id,
+      p_acierto: acierto,
+    })
+    setEnviando(false)
+    if (error) {
+      alert('Error: ' + error.message)
+      return
+    }
+    await enviarResultadoPush(
+      acierto ? '🏆 ¡Acertaste!' : '😏 Esta vez no',
+      acierto
+        ? `Acertaste en ${cat.nombre}. Premio: ${data.premio_ganador}`
+        : `No acertaste en ${cat.nombre}. Premio para ${yo.nombre}: ${data.premio_ganador}`
+    )
+    onResultado({ tipo: acierto ? 'acierto' : 'fallo', categoria: cat, ...data, gano: acierto ? pareja.id === data.ganador_id : yo.id === data.ganador_id })
+  }
+
+  if (duelo.accion === 'confirmar') {
+    return (
+      <div className="tarjeta-categoria" style={{ borderColor: cat.color }}>
+        <button className="link-btn" onClick={onVolver}>
+          ← Volver
+        </button>
+        <h3 style={{ color: cat.color }}>
+          {cat.icono} {cat.nombre}
+        </h3>
+        <p className="paso-titulo">{duelo.preguntas.texto}</p>
+        <p className="ayuda-texto">Tu respuesta real:</p>
+        <p className="pregunta-texto">{duelo.respuesta_a}</p>
+        <p className="ayuda-texto">Lo que adivinó {pareja.nombre}:</p>
+        <p className="pregunta-texto">{duelo.respuesta_b}</p>
+        <p className="paso-titulo">¿Acertó?</p>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button className="btn-lanzar" disabled={enviando} onClick={() => confirmar(true)}>
+            ✅ Sí, acertó
+          </button>
+          <button className="btn-secundario" disabled={enviando} onClick={() => confirmar(false)}>
+            ❌ No acertó
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // accion === 'responder'
   return (
     <div className="tarjeta-categoria" style={{ borderColor: cat.color }}>
       <button className="link-btn" onClick={onVolver}>
@@ -348,54 +429,111 @@ function ResponderRonda({ ronda, yo, pareja, onResultado, onVolver }) {
         </>
       )}
 
-      {(!necesitaPremio || premio) && !respuesta && (
+      {(!necesitaPremio || premio) && (
         <>
-          <p className="ayuda-texto">Misma pregunta para los dos. Gana quien acierte:</p>
-          <p className="pregunta-texto">{ronda.preguntas.texto}</p>
-          {ronda.preguntas.opciones.map((op) => (
-            <div key={op} className="opcion-card" onClick={() => setRespuesta(op)}>
-              {op}
-            </div>
-          ))}
-        </>
-      )}
+          <p className="paso-titulo">{duelo.preguntas.texto}</p>
 
-      {(!necesitaPremio || premio) && respuesta && (
-        <button className="btn-lanzar" disabled={enviando} onClick={responder}>
-          {enviando ? 'Enviando…' : 'Confirmar respuesta'}
-        </button>
+          {duelo.modo === 'adivinar' && (
+            <>
+              <p className="ayuda-texto">Intenta adivinar qué respondió {pareja.nombre}:</p>
+              <textarea
+                className="pin-input"
+                style={{ width: '100%', minHeight: '70px', letterSpacing: 'normal', fontSize: '14px', textAlign: 'left' }}
+                value={textoLibre}
+                onChange={(e) => setTextoLibre(e.target.value)}
+                placeholder="Tu intento…"
+              />
+              {textoLibre.trim().length > 0 && (
+                <button className="btn-lanzar" disabled={enviando} onClick={responder}>
+                  {enviando ? 'Enviando…' : 'Confirmar mi respuesta'}
+                </button>
+              )}
+            </>
+          )}
+
+          {duelo.modo === 'match' && (
+            <>
+              {duelo.preguntas.opciones.map((op) => (
+                <div key={op} className="opcion-card" onClick={() => setRespuesta(op)}>
+                  {op}
+                </div>
+              ))}
+              {respuesta && (
+                <button className="btn-lanzar" disabled={enviando} onClick={responder}>
+                  {enviando ? 'Enviando…' : `Elegir "${respuesta}"`}
+                </button>
+              )}
+            </>
+          )}
+
+          {duelo.modo === 'reto' && (
+            <button className="btn-lanzar" disabled={enviando} onClick={responder}>
+              {enviando ? 'Enviando…' : '✅ Hecho'}
+            </button>
+          )}
+        </>
       )}
     </div>
   )
 }
 
-function ResultadoVista({ resultado, yo, onSeguirJugando, onVolver }) {
-  if (resultado.tipo === 'empate') {
-    return (
-      <div className="pantalla-centro">
-        <p className="resultado-emoji">🔁</p>
-        <h2 style={{ color: resultado.categoria.color }}>¡EMPATE!</h2>
-        <p>Los dos acertasteis, o los dos fallasteis. Se sigue jugando hasta desempatar.</p>
-        <button className="btn-primario" onClick={() => onSeguirJugando()}>
-          Seguir jugando →
-        </button>
-      </div>
-    )
+function ResultadoVista({ resultado, onVolver }) {
+  const { tipo, categoria } = resultado
+
+  const contenido = {
+    esperando_confirmacion: (
+      <>
+        <p className="resultado-emoji">🤔</p>
+        <h2 style={{ color: categoria.color }}>Respuesta enviada</h2>
+        <p>Tu pareja tiene que confirmar si acertaste.</p>
+      </>
+    ),
+    match: (
+      <>
+        <p className="resultado-emoji">🎯</p>
+        <h2 style={{ color: categoria.color }}>¡MATCH!</h2>
+        <p>Los dos elegisteis: {resultado.opcion}</p>
+        {resultado.quesito_completo && <p className="premio-texto">🧀 ¡Quesito {categoria.nombre} completado!</p>}
+        {resultado.legendario && <p className="premio-texto">👑 ¡LOGRO LEGENDARIO! Roscón completo.</p>}
+      </>
+    ),
+    no_match: (
+      <>
+        <p className="resultado-emoji">😅</p>
+        <h2 style={{ color: categoria.color }}>No hubo match</h2>
+        <p>Tú: {resultado.respuesta_b}</p>
+        <p>Tu pareja: {resultado.respuesta_a}</p>
+      </>
+    ),
+    reto_completado: (
+      <>
+        <p className="resultado-emoji">✅</p>
+        <h2 style={{ color: categoria.color }}>¡Reto cumplido!</h2>
+        {resultado.quesito_completo && <p className="premio-texto">🧀 ¡Quesito {categoria.nombre} completado!</p>}
+        {resultado.legendario && <p className="premio-texto">👑 ¡LOGRO LEGENDARIO! Roscón completo.</p>}
+      </>
+    ),
+    acierto: (
+      <>
+        <p className="resultado-emoji">🎯</p>
+        <h2 style={{ color: categoria.color }}>¡Acertó!</h2>
+        <p className="premio-texto">Premio: {resultado.premio_ganador}</p>
+        {resultado.quesito_completo && <p className="premio-texto">🧀 ¡Quesito {categoria.nombre} completado!</p>}
+        {resultado.legendario && <p className="premio-texto">👑 ¡LOGRO LEGENDARIO! Roscón completo.</p>}
+      </>
+    ),
+    fallo: (
+      <>
+        <p className="resultado-emoji">😏</p>
+        <h2 style={{ color: categoria.color }}>No acertó esta vez</h2>
+        <p className="premio-texto">Premio: {resultado.premio_ganador}</p>
+      </>
+    ),
   }
 
-  const { categoria, gano, premio_ganador, quesito_completo, legendario } = resultado
   return (
     <div className="pantalla-centro">
-      <p className="resultado-emoji">{gano ? '🏆' : '😏'}</p>
-      <h2 style={{ color: categoria.color }}>{gano ? '¡HAS GANADO!' : 'Has perdido esta vez'}</h2>
-      <p>
-        Categoría: <b>{categoria.nombre}</b>
-      </p>
-      <p className="premio-texto">
-        {gano ? 'Tu pareja debe cumplir tu premio:' : 'Debes cumplir el premio de tu pareja:'} {premio_ganador}
-      </p>
-      {quesito_completo && <p className="premio-texto">🧀 ¡Quesito {categoria.nombre} completado!</p>}
-      {legendario && <p className="premio-texto">👑 ¡LOGRO LEGENDARIO desbloqueado! Roscón completo.</p>}
+      {contenido[tipo]}
       <button className="btn-primario" onClick={onVolver}>
         Volver
       </button>
