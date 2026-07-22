@@ -280,3 +280,45 @@ body {
   justify-content: center;
   padding: 0 3px;
 }
+
+.aviso-turno {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  text-align: center;
+}
+.aviso-turno-tuyo {
+  background: #14532d;
+  border-color: #22c55e;
+  color: #dcfce7;
+  font-weight: bold;
+}
+.btn-lanzar:disabled {
+  background: #334155;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.seccion-vitrina {
+  margin: 22px 0 10px;
+  font-size: 15px;
+  font-weight: bold;
+  color: #cbd5e1;
+  border-bottom: 1px solid #334155;
+  padding-bottom: 6px;
+}
+.badge-origen {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: bold;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.badge-origen-partida { background: #7c2d12; color: #fed7aa; }
+.badge-origen-duelo { background: #1e3a8a; color: #bfdbfe; }

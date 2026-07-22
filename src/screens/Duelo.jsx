@@ -734,6 +734,9 @@ function PartidaScreen({ yo, pareja, recargarPendientes, onVolver }) {
     return fila ? fila.premio : ''
   }
 
+  const esMiTurno = partida.turno_actual === yo.id
+  const rondaActivaAjena = (partida.ronda_pendiente || []).length > 0 && !esMiTurno
+
   return (
     <div>
       <button className="link-btn" onClick={onVolver}>
@@ -741,6 +744,16 @@ function PartidaScreen({ yo, pareja, recargarPendientes, onVolver }) {
       </button>
       <h3 className="titulo-centro">🏆 Partida en curso</h3>
       <p className="ayuda-texto">Gana 3 preguntas en un quesito para llevártelo. El primero en ganar los 4 se lleva la Partida.</p>
+
+      {esMiTurno ? (
+        <p className="aviso-turno aviso-turno-tuyo">🟢 Es tu turno: elige un quesito y lanza la pregunta.</p>
+      ) : (
+        <p className="aviso-turno">
+          ⏳ Es el turno de {pareja.nombre}
+          {rondaActivaAjena ? ', esperando su respuesta o tu confirmación.' : '.'}
+        </p>
+      )}
+
       {ORDEN_CATEGORIAS.map((id) => {
         const cat = CATEGORIAS[id]
         const misVictorias = progresoDe(yo.id, id)
@@ -759,9 +772,13 @@ function PartidaScreen({ yo, pareja, recargarPendientes, onVolver }) {
               <p className="premio-texto">
                 🧀 Quesito de {ganadorId === yo.id ? 'ti' : pareja.nombre}
               </p>
-            ) : (
+            ) : esMiTurno ? (
               <button className="btn-lanzar" onClick={() => setCategoriaJugando(id)}>
                 Jugar pregunta
+              </button>
+            ) : (
+              <button className="btn-lanzar" disabled>
+                Espera tu turno
               </button>
             )}
             <details>
