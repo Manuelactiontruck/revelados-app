@@ -62,6 +62,10 @@ export default function Duelo({ yo, pareja, pendientes, recargarPendientes }) {
     )
   }
 
+  if (vista === 'partida') {
+    return <PartidaScreen yo={yo} pareja={pareja} recargarPendientes={recargarPendientes} onVolver={irAMenu} />
+  }
+
   if (vista === 'pendientes') {
     return (
       <div>
@@ -82,6 +86,7 @@ export default function Duelo({ yo, pareja, pendientes, recargarPendientes }) {
             >
               {cat.icono} {cat.nombre} —{' '}
               {d.accion === 'confirmar' ? 'confirmar si acertó tu pareja' : 'responder'}
+              {d.partida_id ? ' (Partida)' : ''}
             </div>
           )
         })}
@@ -137,7 +142,16 @@ export default function Duelo({ yo, pareja, pendientes, recargarPendientes }) {
           🔥 Tienes {pendientes.length} duelo{pendientes.length > 1 ? 's' : ''} esperando algo tuyo →
         </button>
       )}
-      <h3 className="titulo-centro">Elige la temática del Duelo de hoy:</h3>
+
+      <div className="opcion-card partida-cta" onClick={() => setVista('partida')}>
+        <b>🏆 Partida completa</b>
+        <br />
+        <small className="ayuda-texto">
+          Elige premios por quesito y por ganar, y jugad hasta que alguien complete los 4 quesitos.
+        </small>
+      </div>
+
+      <h3 className="titulo-centro">O lanza un duelo rápido de hoy:</h3>
       <div className="grid-2x2">
         {ORDEN_CATEGORIAS.map((id) => {
           const cat = CATEGORIAS[id]
@@ -286,12 +300,13 @@ function LanzarDuelo({ categoria, modo, yo, pareja, onEnviado, onVolver }) {
 
 function AccionDuelo({ duelo, yo, pareja, onResultado, onVolver }) {
   const cat = CATEGORIAS[duelo.categoria]
+  const esPartida = !!duelo.partida_id
   const [premio, setPremio] = useState(null)
   const [respuesta, setRespuesta] = useState(null)
   const [textoLibre, setTextoLibre] = useState('')
   const [enviando, setEnviando] = useState(false)
 
-  const necesitaPremio = duelo.modo === 'adivinar'
+  const necesitaPremio = duelo.modo === 'adivinar' && !esPartida
 
   async function enviarResultadoPush(titulo, cuerpo) {
     await enviarPush({ para_quien_id: pareja.id, titulo, cuerpo, url: '/?tab=duelo' })
@@ -299,6 +314,23 @@ function AccionDuelo({ duelo, yo, pareja, onResultado, onVolver }) {
 
   async function responder() {
     setEnviando(true)
+
+    if (esPartida) {
+      const { error } = await supabase.rpc('revelados_responder_ronda_partida', {
+        p_ronda_id: duelo.id,
+        p_jugador_id: yo.id,
+        p_respuesta: textoLibre.trim(),
+      })
+      setEnviando(false)
+      if (error) {
+        alert('Error: ' + error.message)
+        return
+      }
+      await enviarResultadoPush('🤔 Tu pareja ya respondió', `${yo.nombre} adivinó en la Partida (${cat.nombre}). Entra a confirmar si acertó.`)
+      onResultado({ tipo: 'esperando_confirmacion', categoria: cat })
+      return
+    }
+
     const p_respuesta = duelo.modo === 'adivinar' ? textoLibre.trim() : duelo.modo === 'match' ? respuesta : null
     const { data, error } = await supabase.rpc('revelados_responder_duelo', {
       p_duelo_id: duelo.id,
@@ -337,6 +369,44 @@ function AccionDuelo({ duelo, yo, pareja, onResultado, onVolver }) {
 
   async function confirmar(acierto) {
     setEnviando(true)
+
+    if (esPartida) {
+      const { data, error } = await supabase.rpc('revelados_confirmar_ronda_partida', {
+        p_ronda_id: duelo.id,
+        p_jugador_id: yo.id,
+        p_acierto: acierto,
+      })
+      setEnviando(false)
+      if (error) {
+        alert('Error: ' + error.message)
+        return
+      }
+      if (data.partida_ganada) {
+        const ganoYo = data.ganador_id === yo.id
+        await enviarResultadoPush(
+          '👑 ¡Partida ganada!',
+          ganoYo
+            ? `Has ganado la Partida completa. Premio: ${data.partida_premio}`
+            : `${pareja.nombre} ha ganado la Partida completa. Su premio: ${data.partida_premio}`
+        )
+      } else if (data.categoria_locked) {
+        const ganoYo = data.ganador_id === yo.id
+        await enviarResultadoPush(
+          '🧀 ¡Quesito ganado!',
+          ganoYo
+            ? `Has ganado el quesito ${cat.nombre}. Premio: ${data.categoria_premio}`
+            : `${pareja.nombre} ha ganado el quesito ${cat.nombre}.`
+        )
+      } else {
+        await enviarResultadoPush(
+          acierto ? '🎯 Ronda de Partida' : '😏 Ronda de Partida',
+          acierto ? `${yo.nombre} acertó en ${cat.nombre} (Partida).` : `${yo.nombre} no acertó en ${cat.nombre} (Partida).`
+        )
+      }
+      onResultado({ tipo: 'partida_ronda', categoria: cat, yoId: yo.id, parejaNombre: pareja.nombre, ...data })
+      return
+    }
+
     const { data, error } = await supabase.rpc('revelados_confirmar_adivinanza', {
       p_duelo_id: duelo.id,
       p_jugador_id: yo.id,
@@ -363,7 +433,7 @@ function AccionDuelo({ duelo, yo, pareja, onResultado, onVolver }) {
           ← Volver
         </button>
         <h3 style={{ color: cat.color }}>
-          {cat.icono} {cat.nombre}
+          {cat.icono} {cat.nombre} {esPartida ? '(Partida)' : ''}
         </h3>
         <p className="paso-titulo">{duelo.preguntas.texto}</p>
         <p className="ayuda-texto">Tu respuesta real:</p>
@@ -390,7 +460,7 @@ function AccionDuelo({ duelo, yo, pareja, onResultado, onVolver }) {
         ← Volver
       </button>
       <h3 style={{ color: cat.color }}>
-        {cat.icono} {cat.nombre}
+        {cat.icono} {cat.nombre} {esPartida ? '(Partida)' : ''}
       </h3>
 
       {necesitaPremio && !premio && (
@@ -504,6 +574,29 @@ function ResultadoVista({ resultado, onVolver }) {
         <p className="premio-texto">Premio: {resultado.premio_ganador}</p>
       </>
     ),
+    partida_ronda: (
+      <>
+        <p className="resultado-emoji">{resultado.partida_ganada ? '👑' : resultado.categoria_locked ? '🧀' : resultado.resultado === 'acierto' ? '🎯' : '😏'}</p>
+        <h2 style={{ color: categoria.color }}>
+          {resultado.partida_ganada
+            ? '¡Partida ganada!'
+            : resultado.categoria_locked
+            ? `¡Quesito ${categoria.nombre} ganado!`
+            : resultado.resultado === 'acierto'
+            ? '¡Acertó!'
+            : 'No acertó esta vez'}
+        </h2>
+        <p>Ronda para: {resultado.ganador_id === resultado.yoId ? 'ti' : resultado.parejaNombre}</p>
+        {resultado.categoria_locked && !resultado.partida_ganada && resultado.ganador_id === resultado.yoId && (
+          <p className="premio-texto">Premio del quesito: {resultado.categoria_premio}</p>
+        )}
+        {resultado.partida_ganada && (
+          <p className="premio-texto">
+            {resultado.ganador_id === resultado.yoId ? 'Tu premio' : `Premio de ${resultado.parejaNombre}`}: {resultado.partida_premio}
+          </p>
+        )}
+      </>
+    ),
   }
 
   return (
@@ -512,6 +605,325 @@ function ResultadoVista({ resultado, onVolver }) {
       <button className="btn-primario" onClick={onVolver}>
         Volver
       </button>
+    </div>
+  )
+}
+
+function PartidaScreen({ yo, pareja, recargarPendientes, onVolver }) {
+  const [cargando, setCargando] = useState(true)
+  const [partida, setPartida] = useState(null)
+  const [categoriaJugando, setCategoriaJugando] = useState(null)
+
+  const cargarPartida = useCallback(async () => {
+    const { data, error } = await supabase.rpc('revelados_obtener_partida', { p_jugador_id: yo.id })
+    if (error) {
+      console.error(error)
+      setCargando(false)
+      return
+    }
+    setPartida(data && data.id ? data : null)
+    setCargando(false)
+  }, [yo.id])
+
+  useEffect(() => {
+    cargarPartida()
+    const canal = supabase
+      .channel('partida-canal-' + yo.id)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'partidas' }, cargarPartida)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'partida_premios' }, cargarPartida)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'partida_progreso' }, cargarPartida)
+      .subscribe()
+    return () => supabase.removeChannel(canal)
+  }, [cargarPartida, yo.id])
+
+  function volverAlTablero() {
+    setCategoriaJugando(null)
+    cargarPartida()
+    recargarPendientes()
+  }
+
+  if (cargando) return <p className="ayuda-texto">Cargando…</p>
+
+  if (categoriaJugando) {
+    return (
+      <LanzarRondaPartida
+        partida={partida}
+        categoria={CATEGORIAS[categoriaJugando]}
+        yo={yo}
+        pareja={pareja}
+        onVolver={() => setCategoriaJugando(null)}
+        onEnviado={volverAlTablero}
+      />
+    )
+  }
+
+  const yoSoyA = partida && partida.jugador_a_id === yo.id
+  const misPremioPartida = partida ? (yoSoyA ? partida.premio_partida_a : partida.premio_partida_b) : null
+  const yaConfigure = misPremioPartida != null
+
+  if (!partida || partida.estado === 'configurando') {
+    if (partida && yaConfigure) {
+      return (
+        <div className="pantalla-centro">
+          <button className="link-btn" onClick={onVolver}>
+            ← Volver
+          </button>
+          <p className="resultado-emoji">⏳</p>
+          <h2>Esperando a {pareja.nombre}</h2>
+          <p>Ya has elegido tus premios. En cuanto {pareja.nombre} elija los suyos, empieza la Partida.</p>
+          <button
+            className="btn-primario"
+            onClick={async () => {
+              await enviarPush({
+                para_quien_id: pareja.id,
+                titulo: 'REVELADOS 🏆',
+                cuerpo: `${yo.nombre} ya está listo para la Partida completa. ¡Elige tus premios!`,
+                url: '/?tab=duelo',
+              })
+              alert('Aviso enviado')
+            }}
+          >
+            🔔 Avisar a {pareja.nombre}
+          </button>
+        </div>
+      )
+    }
+    return (
+      <ConfigurarPartida
+        yo={yo}
+        pareja={pareja}
+        onVolver={onVolver}
+        onConfigurado={() => cargarPartida()}
+      />
+    )
+  }
+
+  if (partida.estado === 'finalizada') {
+    const ganoYo = partida.ganador_id === yo.id
+    const premioGanador = partida.ganador_id === partida.jugador_a_id ? partida.premio_partida_a : partida.premio_partida_b
+    return (
+      <div className="pantalla-centro">
+        <button className="link-btn" onClick={onVolver}>
+          ← Volver
+        </button>
+        <p className="resultado-emoji">👑</p>
+        <h2>{ganoYo ? '¡Has ganado la Partida!' : `${pareja.nombre} ha ganado la Partida`}</h2>
+        <p className="premio-texto">Premio: {premioGanador}</p>
+        <button className="btn-primario" onClick={() => setPartida(null)}>
+          🎮 Nueva Partida
+        </button>
+      </div>
+    )
+  }
+
+  // en_curso -> tablero
+  const progresoDe = (jugadorId, categoria) => {
+    const fila = (partida.progreso || []).find((p) => p.jugador_id === jugadorId && p.categoria === categoria)
+    return fila ? fila.victorias : 0
+  }
+  const premioDe = (jugadorId, categoria) => {
+    const fila = (partida.premios || []).find((p) => p.jugador_id === jugadorId && p.categoria === categoria)
+    return fila ? fila.premio : ''
+  }
+
+  return (
+    <div>
+      <button className="link-btn" onClick={onVolver}>
+        ← Volver
+      </button>
+      <h3 className="titulo-centro">🏆 Partida en curso</h3>
+      <p className="ayuda-texto">Gana 3 preguntas en un quesito para llevártelo. El primero en ganar los 4 se lleva la Partida.</p>
+      {ORDEN_CATEGORIAS.map((id) => {
+        const cat = CATEGORIAS[id]
+        const misVictorias = progresoDe(yo.id, id)
+        const susVictorias = progresoDe(pareja.id, id)
+        const bloqueado = misVictorias >= 3 || susVictorias >= 3
+        const ganadorId = misVictorias >= 3 ? yo.id : susVictorias >= 3 ? pareja.id : null
+        return (
+          <div key={id} className="tarjeta-categoria" style={{ borderColor: cat.color, marginBottom: '12px' }}>
+            <h3 style={{ color: cat.color }}>
+              {cat.icono} {cat.nombre}
+            </h3>
+            <p>
+              Tú: {misVictorias}/3 — {pareja.nombre}: {susVictorias}/3
+            </p>
+            {bloqueado ? (
+              <p className="premio-texto">
+                🧀 Quesito de {ganadorId === yo.id ? 'ti' : pareja.nombre}
+              </p>
+            ) : (
+              <button className="btn-lanzar" onClick={() => setCategoriaJugando(id)}>
+                Jugar pregunta
+              </button>
+            )}
+            <details>
+              <summary className="ayuda-texto">Ver premios de este quesito</summary>
+              <p className="ayuda-texto">Tu premio si lo ganas: {premioDe(yo.id, id)}</p>
+              <p className="ayuda-texto">Premio de {pareja.nombre} si lo gana: {premioDe(pareja.id, id)}</p>
+            </details>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function ConfigurarPartida({ yo, pareja, onVolver, onConfigurado }) {
+  const [premioPartida, setPremioPartida] = useState('')
+  const [premios, setPremios] = useState({ rosa: null, rojo: null, morado: null, azul: null })
+  const [enviando, setEnviando] = useState(false)
+
+  const listo = premioPartida.trim().length > 0 && ORDEN_CATEGORIAS.every((id) => premios[id])
+
+  async function enviar() {
+    setEnviando(true)
+    const { data, error } = await supabase.rpc('revelados_configurar_partida', {
+      p_jugador_id: yo.id,
+      p_premio_partida: premioPartida.trim(),
+      p_premio_rosa: premios.rosa,
+      p_premio_rojo: premios.rojo,
+      p_premio_morado: premios.morado,
+      p_premio_azul: premios.azul,
+    })
+    setEnviando(false)
+    if (error) {
+      alert('Error: ' + error.message)
+      return
+    }
+    if (data.estado === 'en_curso') {
+      await enviarPush({
+        para_quien_id: pareja.id,
+        titulo: 'REVELADOS 🏆',
+        cuerpo: `¡La Partida completa ha comenzado! Ya podéis jugar.`,
+        url: '/?tab=duelo',
+      })
+    } else {
+      await enviarPush({
+        para_quien_id: pareja.id,
+        titulo: 'REVELADOS 🏆',
+        cuerpo: `${yo.nombre} ha creado una Partida completa. Elige tus premios para empezar.`,
+        url: '/?tab=duelo',
+      })
+    }
+    onConfigurado()
+  }
+
+  return (
+    <div>
+      <button className="link-btn" onClick={onVolver}>
+        ← Volver
+      </button>
+      <h3 className="titulo-centro">🏆 Configura tu Partida completa</h3>
+      <p className="ayuda-texto">
+        Elige un premio para ti por cada quesito que ganes, y un premio extra por ganar la Partida entera.
+      </p>
+
+      {ORDEN_CATEGORIAS.map((id) => {
+        const cat = CATEGORIAS[id]
+        return (
+          <div key={id} style={{ marginBottom: '14px' }}>
+            <p className="paso-titulo" style={{ color: cat.color }}>
+              {cat.icono} {cat.nombre} — tu premio si ganas este quesito:
+            </p>
+            {cat.apuestas.map((ap) => (
+              <div
+                key={ap}
+                className="opcion-card"
+                style={{ background: premios[id] === ap ? cat.color : undefined }}
+                onClick={() => setPremios((p) => ({ ...p, [id]: ap }))}
+              >
+                {ap}
+              </div>
+            ))}
+          </div>
+        )
+      })}
+
+      <p className="paso-titulo">🏆 Tu premio si ganas la Partida entera (los 4 quesitos):</p>
+      <textarea
+        className="pin-input"
+        style={{ width: '100%', minHeight: '60px', letterSpacing: 'normal', fontSize: '14px', textAlign: 'left' }}
+        value={premioPartida}
+        onChange={(e) => setPremioPartida(e.target.value)}
+        placeholder="Escribe el gran premio…"
+      />
+
+      {listo && (
+        <button className="btn-lanzar" disabled={enviando} onClick={enviar}>
+          {enviando ? 'Guardando…' : '✅ Confirmar mis premios'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function LanzarRondaPartida({ partida, categoria, yo, pareja, onVolver, onEnviado }) {
+  const [pregunta, setPregunta] = useState(null)
+  const [textoLibre, setTextoLibre] = useState('')
+  const [enviando, setEnviando] = useState(false)
+
+  useEffect(() => {
+    async function elegirPregunta() {
+      const [{ data: todas }, { data: usadas }] = await Promise.all([
+        supabase.from('preguntas').select('*').eq('categoria', categoria.id).eq('modo', 'adivinar'),
+        supabase.from('duelos').select('pregunta_id').eq('partida_id', partida.id).eq('categoria', categoria.id),
+      ])
+      const usadasIds = new Set((usadas || []).map((u) => u.pregunta_id))
+      let disponibles = (todas || []).filter((p) => !usadasIds.has(p.id))
+      if (disponibles.length === 0) disponibles = todas || []
+      setPregunta(disponibles[Math.floor(Math.random() * disponibles.length)])
+    }
+    elegirPregunta()
+  }, [categoria.id, partida.id])
+
+  async function lanzar() {
+    setEnviando(true)
+    const { error } = await supabase.rpc('revelados_lanzar_ronda_partida', {
+      p_partida_id: partida.id,
+      p_categoria: categoria.id,
+      p_jugador_id: yo.id,
+      p_pregunta_id: pregunta.id,
+      p_respuesta: textoLibre.trim(),
+    })
+    if (error) {
+      alert('Error al lanzar: ' + error.message)
+      setEnviando(false)
+      return
+    }
+    await enviarPush({
+      para_quien_id: pareja.id,
+      titulo: 'REVELADOS 🏆',
+      cuerpo: `${yo.nombre} ha lanzado una pregunta de la Partida en ${categoria.nombre}`,
+      url: '/?tab=duelo',
+    })
+    setEnviando(false)
+    onEnviado()
+  }
+
+  if (!pregunta) return <p className="ayuda-texto">Cargando…</p>
+
+  return (
+    <div className="tarjeta-categoria" style={{ borderColor: categoria.color }}>
+      <button className="link-btn" onClick={onVolver}>
+        ← Volver al tablero
+      </button>
+      <h3 style={{ color: categoria.color }}>
+        {categoria.icono} {categoria.nombre} (Partida)
+      </h3>
+      <p className="paso-titulo">{pregunta.texto}</p>
+      <p className="ayuda-texto">Escribe tu respuesta real y sincera (se mantiene en secreto):</p>
+      <textarea
+        className="pin-input"
+        style={{ width: '100%', minHeight: '70px', letterSpacing: 'normal', fontSize: '14px', textAlign: 'left' }}
+        value={textoLibre}
+        onChange={(e) => setTextoLibre(e.target.value)}
+        placeholder="Tu respuesta secreta…"
+      />
+      {textoLibre.trim().length > 0 && (
+        <button className="btn-lanzar" disabled={enviando} onClick={lanzar}>
+          {enviando ? 'Enviando…' : `⚔️ LANZAR A ${pareja.nombre.toUpperCase()}`}
+        </button>
+      )}
     </div>
   )
 }
