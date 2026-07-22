@@ -7,13 +7,24 @@ import Roscon from './screens/Roscon.jsx'
 import Vitrina from './screens/Vitrina.jsx'
 import TabBar from './components/TabBar.jsx'
 import InstalarBanner from './components/InstalarBanner.jsx'
+import { usePendientes } from './lib/usePendientes'
 
 const SESSION_KEY = 'revelados_perfil_id'
+
+function tabInicialDesdeUrl() {
+  try {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('tab') === 'duelo') return 'duelo'
+  } catch (e) {}
+  return 'pulsador'
+}
 
 export default function App() {
   const [perfilId, setPerfilId] = useState(() => localStorage.getItem(SESSION_KEY))
   const [perfiles, setPerfiles] = useState([])
-  const [tab, setTab] = useState('pulsador')
+  const [tab, setTab] = useState(tabInicialDesdeUrl)
+
+  const { pendientes, recargar: recargarPendientes } = usePendientes(perfilId)
 
   useEffect(() => {
     supabase.from('perfiles_public').select('*').then(({ data }) => {
@@ -62,14 +73,22 @@ export default function App() {
 
       <InstalarBanner perfilId={yo.id} />
 
+      {pendientes.length > 0 && tab !== 'duelo' && (
+        <button className="aviso-pendiente" onClick={() => setTab('duelo')}>
+          🔥 Tienes {pendientes.length} duelo{pendientes.length > 1 ? 's' : ''} esperando algo tuyo →
+        </button>
+      )}
+
       <main className="app-main">
         {tab === 'pulsador' && <Pulsador yo={yo} pareja={pareja} />}
-        {tab === 'duelo' && <Duelo yo={yo} pareja={pareja} />}
+        {tab === 'duelo' && (
+          <Duelo yo={yo} pareja={pareja} pendientes={pendientes} recargarPendientes={recargarPendientes} />
+        )}
         {tab === 'roscon' && <Roscon />}
         {tab === 'logros' && <Vitrina />}
       </main>
 
-      <TabBar tab={tab} setTab={setTab} />
+      <TabBar tab={tab} setTab={setTab} pendientesCount={pendientes.length} />
     </div>
   )
 }

@@ -7,16 +7,13 @@ const TABS = [
   { id: 'logros', label: '🏆 Vitrina' },
 ]
 
-export default function TabBar({ tab, setTab }) {
+export default function TabBar({ tab, setTab, pendientesCount = 0 }) {
   return (
     <nav className="tabbar">
       {TABS.map((t) => (
-        <button
-          key={t.id}
-          className={`tab-btn ${tab === t.id ? 'activo' : ''}`}
-          onClick={() => setTab(t.id)}
-        >
+        <button key={t.id} className={`tab-btn ${tab === t.id ? 'activo' : ''}`} onClick={() => setTab(t.id)}>
           {t.label}
+          {t.id === 'duelo' && pendientesCount > 0 && <span className="tab-badge">{pendientesCount}</span>}
         </button>
       ))}
     </nav>

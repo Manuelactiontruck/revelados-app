@@ -9,36 +9,13 @@ const MODOS = [
   { id: 'reto', label: '🌶️ Reto', desc: 'Un reto directo para que tu pareja lo cumpla ya.' },
 ]
 
-export default function Duelo({ yo, pareja }) {
+export default function Duelo({ yo, pareja, pendientes, recargarPendientes }) {
   const [vista, setVista] = useState('menu')
   const [categoriaSel, setCategoriaSel] = useState(null)
   const [modoSel, setModoSel] = useState(null)
-  const [pendientes, setPendientes] = useState([])
   const [progreso, setProgreso] = useState({})
   const [activo, setActivo] = useState(null)
   const [resultado, setResultado] = useState(null)
-
-  const cargarPendientes = useCallback(async () => {
-    const [{ data: porResponder }, { data: porConfirmar }] = await Promise.all([
-      supabase
-        .from('duelos')
-        .select('*, preguntas(*)')
-        .eq('jugador_b_id', yo.id)
-        .eq('estado', 'pendiente_receptor')
-        .order('created_at', { ascending: true }),
-      supabase
-        .from('duelos')
-        .select('*, preguntas(*)')
-        .eq('jugador_a_id', yo.id)
-        .eq('estado', 'pendiente_confirmacion')
-        .order('created_at', { ascending: true }),
-    ])
-    const lista = [
-      ...(porResponder || []).map((d) => ({ ...d, accion: 'responder' })),
-      ...(porConfirmar || []).map((d) => ({ ...d, accion: 'confirmar' })),
-    ]
-    setPendientes(lista)
-  }, [yo.id])
 
   const cargarProgreso = useCallback(async () => {
     const { data } = await supabase.from('progreso_quesitos').select('*')
@@ -48,15 +25,13 @@ export default function Duelo({ yo, pareja }) {
   }, [])
 
   useEffect(() => {
-    cargarPendientes()
     cargarProgreso()
     const canal = supabase
-      .channel('duelos-canal')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'duelos' }, cargarPendientes)
+      .channel('progreso-duelo-canal')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'progreso_quesitos' }, cargarProgreso)
       .subscribe()
     return () => supabase.removeChannel(canal)
-  }, [cargarPendientes, cargarProgreso])
+  }, [cargarProgreso])
 
   function irAMenu() {
     setVista('menu')
@@ -64,7 +39,7 @@ export default function Duelo({ yo, pareja }) {
     setModoSel(null)
     setActivo(null)
     setResultado(null)
-    cargarPendientes()
+    recargarPendientes()
     cargarProgreso()
   }
 
@@ -237,7 +212,7 @@ function LanzarDuelo({ categoria, modo, yo, pareja, onEnviado, onVolver }) {
       match: `${yo.nombre} te ha lanzado un duelo de "Match" en ${categoria.nombre}`,
       reto: `${yo.nombre} te ha lanzado un Reto en ${categoria.nombre}`,
     }
-    await enviarPush({ para_quien_id: pareja.id, titulo: 'REVELADOS 🎲', cuerpo: mensajes[modo], url: '/' })
+    await enviarPush({ para_quien_id: pareja.id, titulo: 'REVELADOS 🎲', cuerpo: mensajes[modo], url: '/?tab=duelo' })
     setEnviando(false)
     onEnviado(duelo_id)
   }
@@ -319,7 +294,7 @@ function AccionDuelo({ duelo, yo, pareja, onResultado, onVolver }) {
   const necesitaPremio = duelo.modo === 'adivinar'
 
   async function enviarResultadoPush(titulo, cuerpo) {
-    await enviarPush({ para_quien_id: pareja.id, titulo, cuerpo, url: '/' })
+    await enviarPush({ para_quien_id: pareja.id, titulo, cuerpo, url: '/?tab=duelo' })
   }
 
   async function responder() {

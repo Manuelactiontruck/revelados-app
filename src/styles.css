@@ -262,3 +262,21 @@ body {
   font-weight: bold;
   white-space: nowrap;
 }
+
+.tab-btn { position: relative; }
+.tab-badge {
+  position: absolute;
+  top: -4px;
+  right: 2px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: bold;
+  border-radius: 999px;
+  min-width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+}
