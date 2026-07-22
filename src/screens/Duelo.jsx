@@ -47,6 +47,10 @@ export default function Duelo({ yo, pareja, pendientes, recargarPendientes }) {
     return <ResultadoVista resultado={resultado} onVolver={irAMenu} />
   }
 
+  if (vista === 'accion' && activo && activo.accion === 'ver_resultado') {
+    return <VerResultadoDuelo duelo={activo} yo={yo} pareja={pareja} onVolver={irAMenu} />
+  }
+
   if (vista === 'accion' && activo) {
     return (
       <AccionDuelo
@@ -85,7 +89,11 @@ export default function Duelo({ yo, pareja, pendientes, recargarPendientes }) {
               }}
             >
               {cat.icono} {cat.nombre} —{' '}
-              {d.accion === 'confirmar' ? 'confirmar si acertó tu pareja' : 'responder'}
+              {d.accion === 'confirmar'
+                ? 'confirmar si acertó tu pareja'
+                : d.accion === 'ver_resultado'
+                ? 'ver el resultado'
+                : 'responder'}
               {d.partida_id ? ' (Partida)' : ''}
             </div>
           )
@@ -926,4 +934,75 @@ function LanzarRondaPartida({ partida, categoria, yo, pareja, onVolver, onEnviad
       )}
     </div>
   )
+}
+
+function VerResultadoDuelo({ duelo, yo, pareja, onVolver }) {
+  const [resultado, setResultado] = useState(null)
+  const cat = CATEGORIAS[duelo.categoria]
+
+  useEffect(() => {
+    let cancelado = false
+
+    async function marcarYConstruir() {
+      await supabase.rpc('revelados_marcar_visto', { p_duelo_id: duelo.id, p_jugador_id: yo.id })
+
+      if (duelo.partida_id) {
+        const { data: partida } = await supabase.rpc('revelados_obtener_partida', { p_jugador_id: yo.id })
+        if (cancelado) return
+        let categoria_locked = false
+        let categoria_premio = null
+        let partida_ganada = false
+        let partida_premio = null
+        if (partida && duelo.ganador_id) {
+          const fila = (partida.progreso || []).find(
+            (p) => p.jugador_id === duelo.ganador_id && p.categoria === duelo.categoria
+          )
+          if (fila && fila.victorias >= 3) {
+            categoria_locked = true
+            const premioFila = (partida.premios || []).find(
+              (p) => p.jugador_id === duelo.ganador_id && p.categoria === duelo.categoria
+            )
+            categoria_premio = premioFila ? premioFila.premio : null
+          }
+          if (partida.estado === 'finalizada' && partida.ganador_id === duelo.ganador_id) {
+            partida_ganada = true
+            partida_premio =
+              partida.ganador_id === partida.jugador_a_id ? partida.premio_partida_a : partida.premio_partida_b
+          }
+        }
+        setResultado({
+          tipo: 'partida_ronda',
+          categoria: cat,
+          resultado: duelo.resultado,
+          ganador_id: duelo.ganador_id,
+          yoId: yo.id,
+          parejaNombre: pareja.nombre,
+          categoria_locked,
+          categoria_premio,
+          partida_ganada,
+          partida_premio,
+        })
+        return
+      }
+
+      const mapaTipo = { acierto: 'acierto', fallo: 'fallo', match: 'match', no_match: 'no_match', completado: 'reto_completado' }
+      setResultado({
+        tipo: mapaTipo[duelo.resultado] || 'acierto',
+        categoria: cat,
+        premio_ganador: duelo.premio_ganador,
+        respuesta_a: duelo.respuesta_a,
+        respuesta_b: duelo.respuesta_b,
+        opcion: duelo.respuesta_b,
+      })
+    }
+
+    marcarYConstruir()
+    return () => {
+      cancelado = true
+    }
+  }, [duelo, yo.id, pareja, cat])
+
+  if (!resultado) return <p className="ayuda-texto">Cargando resultado…</p>
+
+  return <ResultadoVista resultado={resultado} onVolver={onVolver} />
 }
