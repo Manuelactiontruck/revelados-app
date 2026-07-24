@@ -809,6 +809,7 @@ function PartidaScreen({ yo, pareja, recargarPendientes, onVolver }) {
 
   const esMiTurno = partida.turno_actual === yo.id
   const rondaActivaAjena = (partida.ronda_pendiente || []).length > 0 && !esMiTurno
+  const enDesempate = !!partida.desempate
 
   return (
     <div>
@@ -816,7 +817,13 @@ function PartidaScreen({ yo, pareja, recargarPendientes, onVolver }) {
         ← Volver
       </button>
       <h3 className="titulo-centro">🏆 Partida en curso</h3>
-      <p className="ayuda-texto">Gana 3 preguntas en un quesito para llevártelo. El primero en ganar los 4 se lleva la Partida.</p>
+      {enDesempate ? (
+        <p className="aviso-turno aviso-turno-desempate">
+          ⚡ ¡Empate 2-2! Es la ronda de desempate: quien gane la próxima pregunta se lleva la Partida entera.
+        </p>
+      ) : (
+        <p className="ayuda-texto">Gana 3 preguntas en un quesito para llevártelo. Al final, gana la Partida quien tenga más quesitos.</p>
+      )}
 
       {esMiTurno ? (
         <p className="aviso-turno aviso-turno-tuyo">🟢 Es tu turno: elige un quesito y lanza la pregunta.</p>
@@ -831,7 +838,7 @@ function PartidaScreen({ yo, pareja, recargarPendientes, onVolver }) {
         const cat = CATEGORIAS[id]
         const misVictorias = progresoDe(yo.id, id)
         const susVictorias = progresoDe(pareja.id, id)
-        const bloqueado = misVictorias >= 3 || susVictorias >= 3
+        const bloqueado = (misVictorias >= 3 || susVictorias >= 3) && !enDesempate
         const ganadorId = misVictorias >= 3 ? yo.id : susVictorias >= 3 ? pareja.id : null
         return (
           <div key={id} className="tarjeta-categoria" style={{ borderColor: cat.color, marginBottom: '12px' }}>
@@ -841,13 +848,14 @@ function PartidaScreen({ yo, pareja, recargarPendientes, onVolver }) {
             <p>
               Tú: {misVictorias}/3 — {pareja.nombre}: {susVictorias}/3
             </p>
-            {bloqueado ? (
+            {ganadorId && (
               <p className="premio-texto">
                 🧀 Quesito de {ganadorId === yo.id ? 'ti' : pareja.nombre}
               </p>
-            ) : esMiTurno ? (
+            )}
+            {bloqueado ? null : esMiTurno ? (
               <button className="btn-lanzar" onClick={() => setCategoriaJugando(id)}>
-                Jugar pregunta
+                {enDesempate ? '⚡ Jugar pregunta de desempate' : 'Jugar pregunta'}
               </button>
             ) : (
               <button className="btn-lanzar" disabled>

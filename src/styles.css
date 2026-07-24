@@ -333,3 +333,10 @@ body {
   font-size: 13px;
   margin: 10px 0;
 }
+
+.aviso-turno-desempate {
+  background: #78350f;
+  border-color: #f59e0b;
+  color: #fef3c7;
+  font-weight: bold;
+}
