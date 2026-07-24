@@ -322,3 +322,14 @@ body {
 }
 .badge-origen-partida { background: #7c2d12; color: #fed7aa; }
 .badge-origen-duelo { background: #1e3a8a; color: #bfdbfe; }
+
+.banner-contexto {
+  background: #312e81;
+  color: #e0e7ff;
+  border: 1px solid #4338ca;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-weight: bold;
+  font-size: 13px;
+  margin: 10px 0;
+}

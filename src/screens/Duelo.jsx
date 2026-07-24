@@ -263,19 +263,28 @@ function LanzarDuelo({ categoria, modo, yo, pareja, onEnviado, onVolver }) {
 
       {(!necesitaPremio || premio) && (
         <>
+          {modo === 'adivinar' && (
+            <p className="banner-contexto">
+              🔒 {yo.nombre}, esta es tu respuesta privada — {pareja.nombre} no la verá hasta intentar adivinarla:
+            </p>
+          )}
+          {modo === 'match' && (
+            <p className="banner-contexto">🤝 {yo.nombre}, elige tu opción en secreto:</p>
+          )}
+          {modo === 'reto' && (
+            <p className="banner-contexto">🌶️ Reto que vas a lanzarle a {pareja.nombre}:</p>
+          )}
+
           <p className="paso-titulo">{pregunta.texto}</p>
 
           {modo === 'adivinar' && (
-            <>
-              <p className="ayuda-texto">Escribe tu respuesta real y sincera (se mantiene en secreto):</p>
-              <textarea
-                className="pin-input"
-                style={{ width: '100%', minHeight: '70px', letterSpacing: 'normal', fontSize: '14px', textAlign: 'left' }}
-                value={textoLibre}
-                onChange={(e) => setTextoLibre(e.target.value)}
-                placeholder="Tu respuesta secreta…"
-              />
-            </>
+            <textarea
+              className="pin-input"
+              style={{ width: '100%', minHeight: '70px', letterSpacing: 'normal', fontSize: '14px', textAlign: 'left' }}
+              value={textoLibre}
+              onChange={(e) => setTextoLibre(e.target.value)}
+              placeholder="Tu respuesta secreta…"
+            />
           )}
 
           {modo === 'match' && (
@@ -360,17 +369,24 @@ function AccionDuelo({ duelo, yo, pareja, onResultado, onVolver }) {
     }
     if (data.resultado === 'match') {
       await enviarResultadoPush('🎯 ¡Match!', `${yo.nombre} y tú coincidisteis en ${cat.nombre}: ${data.opcion}`)
-      onResultado({ tipo: 'match', categoria: cat, opcion: data.opcion, ...data })
+      onResultado({ tipo: 'match', categoria: cat, opcion: data.opcion, nombre_a: pareja.nombre, nombre_b: yo.nombre, ...data })
       return
     }
     if (data.resultado === 'no_match') {
       await enviarResultadoPush('😅 No hubo match', `${yo.nombre} respondió en ${cat.nombre}, pero no coincidisteis.`)
-      onResultado({ tipo: 'no_match', categoria: cat, respuesta_a: data.respuesta_a, respuesta_b: data.respuesta_b })
+      onResultado({
+        tipo: 'no_match',
+        categoria: cat,
+        respuesta_a: data.respuesta_a,
+        respuesta_b: data.respuesta_b,
+        nombre_a: pareja.nombre,
+        nombre_b: yo.nombre,
+      })
       return
     }
     if (data.resultado === 'completado') {
       await enviarResultadoPush('✅ Reto cumplido', `${yo.nombre} ha cumplido el reto de ${cat.nombre}`)
-      onResultado({ tipo: 'reto_completado', categoria: cat, ...data })
+      onResultado({ tipo: 'reto_completado', categoria: cat, nombre_b: yo.nombre, ...data })
       return
     }
   }
@@ -431,7 +447,14 @@ function AccionDuelo({ duelo, yo, pareja, onResultado, onVolver }) {
         ? `Acertaste en ${cat.nombre}. Premio: ${data.premio_ganador}`
         : `No acertaste en ${cat.nombre}. Premio para ${yo.nombre}: ${data.premio_ganador}`
     )
-    onResultado({ tipo: acierto ? 'acierto' : 'fallo', categoria: cat, ...data, gano: acierto ? pareja.id === data.ganador_id : yo.id === data.ganador_id })
+    onResultado({
+      tipo: acierto ? 'acierto' : 'fallo',
+      categoria: cat,
+      nombre_a: yo.nombre,
+      nombre_b: pareja.nombre,
+      ...data,
+      gano: acierto ? pareja.id === data.ganador_id : yo.id === data.ganador_id,
+    })
   }
 
   if (duelo.accion === 'confirmar') {
@@ -484,11 +507,24 @@ function AccionDuelo({ duelo, yo, pareja, onResultado, onVolver }) {
 
       {(!necesitaPremio || premio) && (
         <>
+          {duelo.modo === 'adivinar' && (
+            <p className="banner-contexto">
+              ❓ {yo.nombre}, ponte en la piel de {pareja.nombre} y adivina qué respondería {pareja.nombre} a esto:
+            </p>
+          )}
+          {duelo.modo === 'match' && (
+            <p className="banner-contexto">
+              🤝 {yo.nombre}, elige tu opción sin saber lo que eligió {pareja.nombre}:
+            </p>
+          )}
+          {duelo.modo === 'reto' && (
+            <p className="banner-contexto">🌶️ Reto de {pareja.nombre} para ti, {yo.nombre}:</p>
+          )}
+
           <p className="paso-titulo">{duelo.preguntas.texto}</p>
 
           {duelo.modo === 'adivinar' && (
             <>
-              <p className="ayuda-texto">Intenta adivinar qué respondió {pareja.nombre}:</p>
               <textarea
                 className="pin-input"
                 style={{ width: '100%', minHeight: '70px', letterSpacing: 'normal', fontSize: '14px', textAlign: 'left' }}
@@ -545,7 +581,9 @@ function ResultadoVista({ resultado, onVolver }) {
       <>
         <p className="resultado-emoji">🎯</p>
         <h2 style={{ color: categoria.color }}>¡MATCH!</h2>
-        <p>Los dos elegisteis: {resultado.opcion}</p>
+        <p>
+          {resultado.nombre_a} y {resultado.nombre_b} coincidisteis en: {resultado.opcion}
+        </p>
         {resultado.quesito_completo && <p className="premio-texto">🧀 ¡Quesito {categoria.nombre} completado!</p>}
         {resultado.legendario && <p className="premio-texto">👑 ¡LOGRO LEGENDARIO! Roscón completo.</p>}
       </>
@@ -554,14 +592,18 @@ function ResultadoVista({ resultado, onVolver }) {
       <>
         <p className="resultado-emoji">😅</p>
         <h2 style={{ color: categoria.color }}>No hubo match</h2>
-        <p>Tú: {resultado.respuesta_b}</p>
-        <p>Tu pareja: {resultado.respuesta_a}</p>
+        <p>
+          {resultado.nombre_a} contestó: {resultado.respuesta_a}
+        </p>
+        <p>
+          {resultado.nombre_b} contestó: {resultado.respuesta_b}
+        </p>
       </>
     ),
     reto_completado: (
       <>
         <p className="resultado-emoji">✅</p>
-        <h2 style={{ color: categoria.color }}>¡Reto cumplido!</h2>
+        <h2 style={{ color: categoria.color }}>¡Reto cumplido por {resultado.nombre_b}!</h2>
         {resultado.quesito_completo && <p className="premio-texto">🧀 ¡Quesito {categoria.nombre} completado!</p>}
         {resultado.legendario && <p className="premio-texto">👑 ¡LOGRO LEGENDARIO! Roscón completo.</p>}
       </>
@@ -569,8 +611,8 @@ function ResultadoVista({ resultado, onVolver }) {
     acierto: (
       <>
         <p className="resultado-emoji">🎯</p>
-        <h2 style={{ color: categoria.color }}>¡Acertó!</h2>
-        <p className="premio-texto">Premio: {resultado.premio_ganador}</p>
+        <h2 style={{ color: categoria.color }}>¡{resultado.nombre_b} acertó!</h2>
+        <p className="premio-texto">Premio para {resultado.nombre_b}: {resultado.premio_ganador}</p>
         {resultado.quesito_completo && <p className="premio-texto">🧀 ¡Quesito {categoria.nombre} completado!</p>}
         {resultado.legendario && <p className="premio-texto">👑 ¡LOGRO LEGENDARIO! Roscón completo.</p>}
       </>
@@ -578,31 +620,41 @@ function ResultadoVista({ resultado, onVolver }) {
     fallo: (
       <>
         <p className="resultado-emoji">😏</p>
-        <h2 style={{ color: categoria.color }}>No acertó esta vez</h2>
-        <p className="premio-texto">Premio: {resultado.premio_ganador}</p>
+        <h2 style={{ color: categoria.color }}>{resultado.nombre_b} no acertó esta vez</h2>
+        <p className="premio-texto">Premio para {resultado.nombre_a}: {resultado.premio_ganador}</p>
       </>
     ),
-    partida_ronda: (
+    partida_ronda: resultado.partida_ganada ? (
       <>
-        <p className="resultado-emoji">{resultado.partida_ganada ? '👑' : resultado.categoria_locked ? '🧀' : resultado.resultado === 'acierto' ? '🎯' : '😏'}</p>
-        <h2 style={{ color: categoria.color }}>
-          {resultado.partida_ganada
-            ? '¡Partida ganada!'
-            : resultado.categoria_locked
-            ? `¡Quesito ${categoria.nombre} ganado!`
-            : resultado.resultado === 'acierto'
-            ? '¡Acertó!'
-            : 'No acertó esta vez'}
+        <p className="resultado-emoji">{resultado.ganador_id === resultado.yoId ? '🏆' : '💔'}</p>
+        <h2 style={{ color: resultado.ganador_id === resultado.yoId ? '#facc15' : categoria.color }}>
+          {resultado.ganador_id === resultado.yoId ? '¡HAS GANADO LA PARTIDA!' : 'Partida perdida'}
         </h2>
+        <p className="premio-texto">
+          {resultado.ganador_id === resultado.yoId
+            ? `Tu premio: ${resultado.partida_premio}`
+            : `Le debes a ${resultado.parejaNombre}: ${resultado.partida_premio}`}
+        </p>
+      </>
+    ) : resultado.categoria_locked ? (
+      <>
+        <p className="resultado-emoji">🧀</p>
+        <h2 style={{ color: categoria.color }}>
+          {resultado.ganador_id === resultado.yoId
+            ? `¡Ganaste el quesito ${categoria.nombre}!`
+            : `${resultado.parejaNombre} se lleva el quesito ${categoria.nombre}`}
+        </h2>
+        {resultado.ganador_id === resultado.yoId ? (
+          <p className="premio-texto">Tu premio: {resultado.categoria_premio}</p>
+        ) : (
+          <p className="premio-texto">Le debes a {resultado.parejaNombre}: {resultado.categoria_premio}</p>
+        )}
+      </>
+    ) : (
+      <>
+        <p className="resultado-emoji">{resultado.resultado === 'acierto' ? '🎯' : '😏'}</p>
+        <h2 style={{ color: categoria.color }}>{resultado.resultado === 'acierto' ? '¡Acertó!' : 'No acertó esta vez'}</h2>
         <p>Ronda para: {resultado.ganador_id === resultado.yoId ? 'ti' : resultado.parejaNombre}</p>
-        {resultado.categoria_locked && !resultado.partida_ganada && resultado.ganador_id === resultado.yoId && (
-          <p className="premio-texto">Premio del quesito: {resultado.categoria_premio}</p>
-        )}
-        {resultado.partida_ganada && (
-          <p className="premio-texto">
-            {resultado.ganador_id === resultado.yoId ? 'Tu premio' : `Premio de ${resultado.parejaNombre}`}: {resultado.partida_premio}
-          </p>
-        )}
       </>
     ),
   }
@@ -621,6 +673,7 @@ function PartidaScreen({ yo, pareja, recargarPendientes, onVolver }) {
   const [cargando, setCargando] = useState(true)
   const [partida, setPartida] = useState(null)
   const [categoriaJugando, setCategoriaJugando] = useState(null)
+  const [verNueva, setVerNueva] = useState(false)
 
   const cargarPartida = useCallback(async () => {
     const { data, error } = await supabase.rpc('revelados_obtener_partida', { p_jugador_id: yo.id })
@@ -665,6 +718,44 @@ function PartidaScreen({ yo, pareja, recargarPendientes, onVolver }) {
     )
   }
 
+  if (partida && partida.estado === 'finalizada' && !verNueva) {
+    const ganoYo = partida.ganador_id === yo.id
+    const premioGanador = partida.ganador_id === partida.jugador_a_id ? partida.premio_partida_a : partida.premio_partida_b
+    return (
+      <div className="pantalla-centro">
+        <button className="link-btn" onClick={onVolver}>
+          ← Volver
+        </button>
+        <p className="resultado-emoji" style={{ fontSize: '64px' }}>
+          {ganoYo ? '🏆' : '💔'}
+        </p>
+        <h2 style={{ color: ganoYo ? '#facc15' : '#94a3b8' }}>
+          {ganoYo ? '¡HAS GANADO LA PARTIDA!' : `${pareja.nombre} ha ganado la Partida`}
+        </h2>
+        <p className="premio-texto" style={{ fontSize: '16px' }}>
+          {ganoYo ? `Tu premio: ${premioGanador}` : `Le debes a ${pareja.nombre}: ${premioGanador}`}
+        </p>
+        <button className="btn-primario" onClick={() => setVerNueva(true)}>
+          🎮 Jugar una Partida nueva
+        </button>
+      </div>
+    )
+  }
+
+  if (verNueva && partida && partida.estado === 'finalizada') {
+    return (
+      <ConfigurarPartida
+        yo={yo}
+        pareja={pareja}
+        onVolver={() => setVerNueva(false)}
+        onConfigurado={() => {
+          setVerNueva(false)
+          cargarPartida()
+        }}
+      />
+    )
+  }
+
   const yoSoyA = partida && partida.jugador_a_id === yo.id
   const misPremioPartida = partida ? (yoSoyA ? partida.premio_partida_a : partida.premio_partida_b) : null
   const yaConfigure = misPremioPartida != null
@@ -703,24 +794,6 @@ function PartidaScreen({ yo, pareja, recargarPendientes, onVolver }) {
         onVolver={onVolver}
         onConfigurado={() => cargarPartida()}
       />
-    )
-  }
-
-  if (partida.estado === 'finalizada') {
-    const ganoYo = partida.ganador_id === yo.id
-    const premioGanador = partida.ganador_id === partida.jugador_a_id ? partida.premio_partida_a : partida.premio_partida_b
-    return (
-      <div className="pantalla-centro">
-        <button className="link-btn" onClick={onVolver}>
-          ← Volver
-        </button>
-        <p className="resultado-emoji">👑</p>
-        <h2>{ganoYo ? '¡Has ganado la Partida!' : `${pareja.nombre} ha ganado la Partida`}</h2>
-        <p className="premio-texto">Premio: {premioGanador}</p>
-        <button className="btn-primario" onClick={() => setPartida(null)}>
-          🎮 Nueva Partida
-        </button>
-      </div>
     )
   }
 
@@ -935,8 +1008,10 @@ function LanzarRondaPartida({ partida, categoria, yo, pareja, onVolver, onEnviad
       <h3 style={{ color: categoria.color }}>
         {categoria.icono} {categoria.nombre} (Partida)
       </h3>
+      <p className="banner-contexto">
+        🔒 {yo.nombre}, tu respuesta privada de la Partida — {pareja.nombre} no la verá hasta intentar adivinarla:
+      </p>
       <p className="paso-titulo">{pregunta.texto}</p>
-      <p className="ayuda-texto">Escribe tu respuesta real y sincera (se mantiene en secreto):</p>
       <textarea
         className="pin-input"
         style={{ width: '100%', minHeight: '70px', letterSpacing: 'normal', fontSize: '14px', textAlign: 'left' }}
@@ -959,6 +1034,8 @@ function VerResultadoDuelo({ duelo, yo, pareja, onVolver }) {
 
   useEffect(() => {
     let cancelado = false
+    const nombre_a = duelo.jugador_a_id === yo.id ? yo.nombre : pareja.nombre
+    const nombre_b = duelo.jugador_b_id === yo.id ? yo.nombre : pareja.nombre
 
     async function marcarYConstruir() {
       await supabase.rpc('revelados_marcar_visto', { p_duelo_id: duelo.id, p_jugador_id: yo.id })
@@ -994,6 +1071,8 @@ function VerResultadoDuelo({ duelo, yo, pareja, onVolver }) {
           ganador_id: duelo.ganador_id,
           yoId: yo.id,
           parejaNombre: pareja.nombre,
+          nombre_a,
+          nombre_b,
           categoria_locked,
           categoria_premio,
           partida_ganada,
@@ -1010,6 +1089,8 @@ function VerResultadoDuelo({ duelo, yo, pareja, onVolver }) {
         respuesta_a: duelo.respuesta_a,
         respuesta_b: duelo.respuesta_b,
         opcion: duelo.respuesta_b,
+        nombre_a,
+        nombre_b,
       })
     }
 
@@ -1017,7 +1098,7 @@ function VerResultadoDuelo({ duelo, yo, pareja, onVolver }) {
     return () => {
       cancelado = true
     }
-  }, [duelo, yo.id, pareja, cat])
+  }, [duelo, yo.id, yo.nombre, pareja, cat])
 
   if (!resultado) return <p className="ayuda-texto">Cargando resultado…</p>
 
